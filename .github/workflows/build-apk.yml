@@ -8,7 +8,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -74,8 +74,10 @@ jobs:
           for f in build_app/android/app/build.gradle build_app/android/app/build.gradle.kts; do
             [ -f "$f" ] || continue
             sed -i -E 's/^([[:space:]]*)minSdk(Version)?[[:space:]=]+.*/\1minSdk = 24/' "$f"
-            sed -i -E 's/^([[:space:]]*)compileSdk(Version)?[[:space:]=]+.*/\1compileSdk = 35/' "$f"
+            sed -i -E 's/^([[:space:]]*)compileSdk(Version)?[[:space:]=]+.*/\1compileSdk = 36/' "$f"
             sed -i -E 's/^([[:space:]]*)targetSdk(Version)?[[:space:]=]+.*/\1targetSdk = 35/' "$f"
+            echo "--- patched $f ---"
+            grep -nE 'minSdk|compileSdk|targetSdk' "$f"
           done
           for m in debug profile; do
             F=build_app/android/app/src/$m/AndroidManifest.xml
