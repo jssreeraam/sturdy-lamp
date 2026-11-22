@@ -1,0 +1,96 @@
+name: Build FocusGuard APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Create base Flutter project
+        run: flutter create --org com.focusguard --project-name focusguard --platforms=android build_app
+
+      - name: Assemble project from uploaded files
+        shell: bash
+        run: |
+          set -e
+          APP=build_app
+          M=$APP/android/app/src/main
+          K=$M/kotlin/com/focusguard/focusguard
+          EXCL='-not -path ./build_app/* -not -path ./.git/*'
+
+          pick() { find . -type f -name "$1" $EXCL | head -n1; }
+          need() {
+            f=$(pick "$1")
+            if [ -z "$f" ]; then echo "::error::Missing file: $1"; exit 1; fi
+            echo "$f"
+          }
+
+          cp "$(need pubspec.yaml)" $APP/pubspec.yaml
+
+          rm -rf $APP/lib $APP/test
+          mkdir -p $APP/lib $APP/assets
+          find . -type f -name '*.dart' $EXCL -exec cp {} $APP/lib/ \;
+          cp "$(need study_girl.png)" $APP/assets/study_girl.png
+
+          cp "$(need AndroidManifest.xml)" $M/AndroidManifest.xml
+
+          mkdir -p $K
+          rm -f $K/*.kt
+          find . -type f -name '*.kt' $EXCL -exec cp {} $K/ \;
+
+          mkdir -p $M/res/xml $M/res/values
+          cp "$(need accessibility_config.xml)" $M/res/xml/
+          cp "$(need device_admin.xml)" $M/res/xml/
+          cp "$(need strings.xml)" $M/res/values/strings.xml
+
+          echo "Dart files: $(ls $APP/lib | wc -l) (expect 14)"
+          echo "Kotlin files: $(ls $K | wc -l) (expect 8)"
+          [ "$(ls $APP/lib | wc -l)" -ge 14 ] || { echo "::error::Dart files missing"; exit 1; }
+          [ "$(ls $K | wc -l)" -ge 8 ] || { echo "::error::Kotlin files missing"; exit 1; }
+
+      - name: Patch SDK versions and strip debug INTERNET permission
+        shell: bash
+        run: |
+          for f in build_app/android/app/build.gradle build_app/android/app/build.gradle.kts; do
+            [ -f "$f" ] || continue
+            sed -i -E 's/^([[:space:]]*)minSdk(Version)?[[:space:]=]+.*/\1minSdk = 24/' "$f"
+            sed -i -E 's/^([[:space:]]*)compileSdk(Version)?[[:space:]=]+.*/\1compileSdk = 35/' "$f"
+            sed -i -E 's/^([[:space:]]*)targetSdk(Version)?[[:space:]=]+.*/\1targetSdk = 35/' "$f"
+          done
+          for m in debug profile; do
+            F=build_app/android/app/src/$m/AndroidManifest.xml
+            if [ -f "$F" ]; then sed -i '/INTERNET/d' "$F"; fi
+          done
+
+      - name: Get packages
+        working-directory: build_app
+        run: flutter pub get
+
+      - name: Build split APKs
+        working-directory: build_app
+        run: flutter build apk --release --split-per-abi
+
+      - name: Build universal APK
+        working-directory: build_app
+        run: flutter build apk --release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FocusGuard-APKs
+          path: build_app/build/app/outputs/flutter-apk/*.apk
