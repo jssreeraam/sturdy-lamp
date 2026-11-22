@@ -32,12 +32,16 @@ jobs:
           APP=build_app
           M=$APP/android/app/src/main
           K=$M/kotlin/com/focusguard/focusguard
-          EXCL='-not -path ./build_app/* -not -path ./.git/*'
 
-          pick() { find . -type f -name "$1" $EXCL | head -n1; }
+          pick() {
+            find . -type f -name "$1" -not -path './build_app/*' -not -path './.git/*' | head -n1
+          }
           need() {
             f=$(pick "$1")
-            if [ -z "$f" ]; then echo "::error::Missing file: $1"; exit 1; fi
+            if [ -z "$f" ]; then
+              echo "::error::Missing file: $1" >&2
+              exit 1
+            fi
             echo "$f"
           }
 
@@ -45,14 +49,14 @@ jobs:
 
           rm -rf $APP/lib $APP/test
           mkdir -p $APP/lib $APP/assets
-          find . -type f -name '*.dart' $EXCL -exec cp {} $APP/lib/ \;
+          find . -type f -name '*.dart' -not -path './build_app/*' -not -path './.git/*' -exec cp {} $APP/lib/ \;
           cp "$(need study_girl.png)" $APP/assets/study_girl.png
 
           cp "$(need AndroidManifest.xml)" $M/AndroidManifest.xml
 
           mkdir -p $K
           rm -f $K/*.kt
-          find . -type f -name '*.kt' $EXCL -exec cp {} $K/ \;
+          find . -type f -name '*.kt' -not -path './build_app/*' -not -path './.git/*' -exec cp {} $K/ \;
 
           mkdir -p $M/res/xml $M/res/values
           cp "$(need accessibility_config.xml)" $M/res/xml/
@@ -61,8 +65,8 @@ jobs:
 
           echo "Dart files: $(ls $APP/lib | wc -l) (expect 14)"
           echo "Kotlin files: $(ls $K | wc -l) (expect 8)"
-          [ "$(ls $APP/lib | wc -l)" -ge 14 ] || { echo "::error::Dart files missing"; exit 1; }
-          [ "$(ls $K | wc -l)" -ge 8 ] || { echo "::error::Kotlin files missing"; exit 1; }
+          [ "$(ls $APP/lib | wc -l)" -ge 14 ] || { echo "::error::Dart files missing" >&2; exit 1; }
+          [ "$(ls $K | wc -l)" -ge 8 ] || { echo "::error::Kotlin files missing" >&2; exit 1; }
 
       - name: Patch SDK versions and strip debug INTERNET permission
         shell: bash
