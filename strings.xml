@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="a11y_desc">FocusGuard sends distraction apps to the Home screen while a study lock is active. It never records or transmits anything; the app has no internet permission.</string>
+</resources>
