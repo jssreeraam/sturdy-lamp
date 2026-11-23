@@ -1,15 +1,13 @@
 import 'dart:async';
-import 'dart:io';
-import 'package:camera/camera.dart';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
-import 'package:google_mlkit_image_labeling/google_mlkit_image_labeling.dart';
 import 'models.dart';
 import 'native.dart';
 import 'store.dart';
 import 'girl.dart';
 import 'theme.dart';
+import 'vision.dart';
 import 'widgets.dart';
 
 class SessionScreen extends ConsumerStatefulWidget {
@@ -21,19 +19,16 @@ class SessionScreen extends ConsumerStatefulWidget {
 
 class _SessionScreenState extends ConsumerState<SessionScreen> {
   DateTime _start = DateTime.now();
-  Timer? _tick, _shot;
+  Timer? _tick, _shotTimer;
   int _elapsed = 0;
-  CameraController? _cam;
-  FaceDetector? _face;
-  ImageLabeler? _lab;
+  VisionService? _vision;
+  final _rng = Random();
 
   late final bool calibrating;
   late final int maxLives;
   int tokens = 0, nStudy = 0, nNeutral = 0, nBad = 0, distractions = 0, points = 0;
-  bool _prevBad = false, _busy = false, _dim = false, _noise = false;
-  bool _done = false, _ready = false, _locked = false;
+  bool _dim = false, _noise = false, _done = false, _ready = false, _locked = false;
   String _status = 'Preparing…';
-  final List<List<double>> _hist = []; // recent face metrics for the live-face check
 
   SessionConfig get cfg => widget.cfg;
   int get total => cfg.minutes * 60;
@@ -73,23 +68,11 @@ class _SessionScreenState extends ConsumerState<SessionScreen> {
 
   Future<bool> _initCam() async {
     try {
-      final cams = await availableCameras();
-      final dir = cfg.front ? CameraLensDirection.front : CameraLensDirection.back;
-      final cam = cams.firstWhere((c) => c.lensDirection == dir, orElse: () => cams.first);
-      final c = CameraController(cam, ResolutionPreset.high, enableAudio: false, imageFormatGroup: ImageFormatGroup.jpeg);
-      await c.initialize();
-      await c.setFlashMode(FlashMode.off);
-      _cam = c;
-      _face = FaceDetector(
-        options: FaceDetectorOptions(
-          enableClassification: true,
-          performanceMode: FaceDetectorMode.accurate,
-          minFaceSize: 0.08,
-        ),
-      );
-      _lab = ImageLabeler(options: ImageLabelerOptions(confidenceThreshold: 0.4));
+      final v = VisionService();
+      await v.init(front: cfg.front);
+      _vision = v;
       _status = calibrating ? 'Calibration day: learning your focus pattern…' : 'Watching quietly…';
-      _shot = Timer.periodic(Duration(seconds: cfg.intervalSec), (_) => _capture());
+      _scheduleNext(first: true);
       return true;
     } catch (_) {
       if (mounted) {
@@ -109,105 +92,37 @@ class _SessionScreenState extends ConsumerState<SessionScreen> {
     }
   }
 
-  Future<void> _capture() async {
-    if (_busy || _done || _cam == null || !_cam!.value.isInitialized) return;
-    _busy = true;
-    XFile? f;
-    try {
-      await _cam!.setFlashMode(FlashMode.off); // flash is NEVER allowed to fire
-      f = await _cam!.takePicture();
-      final img = InputImage.fromFilePath(f.path);
-      final faces = await _face!.processImage(img);
-      final labels = await _lab!.processImage(img);
-      _classify(faces, labels);
-    } catch (_) {
-    } finally {
-      if (f != null) { try { await File(f.path).delete(); } catch (_) {} }
-      _busy = false;
-    }
+  /// Checks happen at RANDOM times around your chosen interval, so they can't be timed.
+  /// The first check comes after ~8 seconds so you can see it working.
+  void _scheduleNext({bool first = false}) {
+    if (_done) return;
+    final base = cfg.intervalSec;
+    final secs = first ? 8 : (base * (0.6 + _rng.nextDouble() * 0.8)).round().clamp(5, 600).toInt();
+    _shotTimer = Timer(Duration(seconds: secs), () async {
+      await _check();
+      _scheduleNext();
+    });
   }
 
-  /// A photo / frozen video of a face never changes. A live face always jitters a little.
-  bool _isStatic(Face f) {
-    final b = f.boundingBox;
-    _hist.add([
-      b.left, b.top, b.width, b.height,
-      f.headEulerAngleY ?? 0, f.headEulerAngleX ?? 0,
-      f.leftEyeOpenProbability ?? 0, f.rightEyeOpenProbability ?? 0,
-    ]);
-    if (_hist.length > 3) _hist.removeAt(0);
-    if (_hist.length < 3) return false;
-    for (int i = 1; i < 3; i++) {
-      for (int k = 0; k < 4; k++) { if ((_hist[i][k] - _hist[0][k]).abs() > 4) return false; }
-      if ((_hist[i][4] - _hist[0][4]).abs() > 0.4 || (_hist[i][5] - _hist[0][5]).abs() > 0.4) return false;
-      if ((_hist[i][6] - _hist[0][6]).abs() > 0.03 || (_hist[i][7] - _hist[0][7]).abs() > 0.03) return false;
-    }
-    return true;
-  }
-
-  void _classify(List<Face> faces, List<ImageLabel> labels) {
-    bool has(List<String> keys, double minC) =>
-        labels.any((l) => l.confidence >= minC && keys.any((k) => l.label.toLowerCase().contains(k)));
-    final bookish = has(['book', 'paper', 'notebook', 'text', 'writing', 'stationery', 'publication', 'document', 'handwriting', 'pen'], 0.4);
-    final device = has(['mobile phone', 'smartphone', 'telephone', 'communication device', 'laptop', 'netbook', 'tablet', 'television', 'computer monitor', 'display device', 'screen', 'computer'], 0.65);
-    final person = has(['person', 'human', 'hand', 'finger', 'arm', 'hair', 'head', 'forehead', 'skin', 'shoulder', 'sleeve', 'neck', 'chin', 'cheek'], 0.4);
-
-    String kind;
-    if (device) {
-      kind = 'Device'; // using another device
-    } else if (faces.isEmpty) {
-      _hist.clear();
-      // head tipped far down over a book can hide the face; a person + book is still studying
-      kind = (bookish && person) ? 'Study' : 'Absent';
-    } else {
-      final sorted = [...faces];
-      sorted.sort((a, b) => (b.boundingBox.width * b.boundingBox.height).compareTo(a.boundingBox.width * a.boundingBox.height));
-      final fc = sorted.first;
-      final l = fc.leftEyeOpenProbability, r = fc.rightEyeOpenProbability;
-      final eyesClosed = l != null && r != null && l < 0.25 && r < 0.25;
-      final yaw = (fc.headEulerAngleY ?? 0).abs();
-      final pitch = fc.headEulerAngleX ?? 0; // negative = looking down
-      final roll = (fc.headEulerAngleZ ?? 0).abs();
-      if (_isStatic(fc)) {
-        kind = 'Static';
-      } else if (pitch < -8) {
-        // looking down at the book: eyes are NOT considered at all
-        kind = yaw > 60 ? 'Distracted' : 'Study';
-      } else if (eyesClosed || roll > 40) {
-        kind = 'Sleeping';
-      } else if (yaw > 45) {
-        kind = 'Distracted';
-      } else {
-        kind = bookish ? 'Study' : 'Neutral';
-      }
-    }
-
-    const badKinds = {'Distracted', 'Absent', 'Device', 'Static', 'Sleeping'};
-    final bad = badKinds.contains(kind);
-    if (bad && _prevBad) {
-      // two checks in a row required, so a quick glance never costs a life
-      distractions++;
-      nBad++;
-      if (!calibrating) tokens--;
-      Native.vibrate(kind == 'Absent' ? [0, 450] : [0, 120, 90, 120]);
-      final why = {
-        'Absent': 'Not in frame',
-        'Device': 'Another device in view',
-        'Sleeping': 'Looks asleep',
-        'Static': 'Face is not live',
-        'Distracted': 'Looking away',
-      }[kind]!;
-      _status = calibrating ? '$why (calibration: no life lost)' : '$why. -1 life';
-    } else if (bad) {
+  Future<void> _check() async {
+    final v = _vision;
+    if (_done || v == null || !_ready) return;
+    final s = await v.classify();
+    if (_done || !mounted) return;
+    final info = v.lastInfo;
+    if (s == FocusState.study) {
+      nStudy++; points += 2;
+      _status = '$info · +2';
+    } else if (s == FocusState.neutral) {
       nNeutral++;
-      _status = 'Checking in…';
-    } else if (kind == 'Study') {
-      nStudy++; points += 2; _status = 'Deep focus ✓ +2';
+      _status = info;
     } else {
-      nNeutral++; points += 1; _status = 'Steady +1';
+      distractions++; nBad++;
+      if (!calibrating) tokens--;
+      Native.vibrate(s == FocusState.absent ? [0, 450] : [0, 120, 90, 120]);
+      _status = '$info · ${calibrating ? 'calibration, no life lost' : '-1 life'}';
     }
-    _prevBad = bad;
-    if (mounted) setState(() {});
+    setState(() {});
     if (!calibrating && cfg.camera && tokens <= 0) _finish(failed: true);
   }
 
@@ -218,11 +133,9 @@ class _SessionScreenState extends ConsumerState<SessionScreen> {
 
   void _cleanup() {
     _tick?.cancel();
-    _shot?.cancel();
-    _cam?.dispose();
-    _face?.close();
-    _lab?.close();
-    _cam = null; _face = null; _lab = null;
+    _shotTimer?.cancel();
+    _vision?.dispose();
+    _vision = null;
     Native.keepScreenOn(false);
     Native.stopNoise();
     Native.cancelSessionAlert();
