@@ -40,9 +40,35 @@ class _StudyTabState extends ConsumerState<StudyTab> {
     final st = ref.read(storeProvider);
     final lock = await Native.lockStatus();
     if (lock.active) { snack('A lockdown is active. Finish it or use the Guardian PIN first.'); return; }
-    if (!camera && st.apps.isEmpty) {
-      snack('Pick at least one distraction app to lock (Phone-Study mode).');
-      return;
+    if (!await Native.isA11yEnabled() || !await Native.canOverlay()) {
+      if (!mounted) return;
+      final go = await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Blocker is off'),
+          content: const Text('Accessibility or "Display over other apps" is not allowed, so other apps will NOT be fully restricted during this block. Continue anyway?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+            TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Continue')),
+          ],
+        ),
+      );
+      if (go != true) return;
+    }
+    if (st.strict && !st.hasPin) {
+      if (!mounted) return;
+      final go = await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('No Guardian PIN'),
+          content: const Text('End-early is locked down, and no PIN is set, so you will NOT be able to end this block early. Continue?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+            TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Continue')),
+          ],
+        ),
+      );
+      if (go != true) return;
     }
     if (camera) {
       final ok = await showDialog<bool>(context: context, builder: (_) => CameraPreviewDialog(front: st.front));
@@ -50,7 +76,7 @@ class _StudyTabState extends ConsumerState<StudyTab> {
     }
     final cfg = SessionConfig(
       subject: subject, mode: mode, goal: goal.text.trim(), minutes: minutes,
-      camera: camera, front: st.front, intervalSec: st.interval,
+      camera: camera, front: st.front, intervalSec: st.interval, strict: st.strict,
     );
     if (!mounted) return;
     final res = await Navigator.push<SessionResult>(context, MaterialPageRoute(builder: (_) => SessionScreen(cfg: cfg)));
@@ -160,8 +186,8 @@ class _StudyTabState extends ConsumerState<StudyTab> {
           Text(camera ? 'AI Camera Proctor' : 'Phone-Study Lock', style: hs(18)),
           const SizedBox(height: 4),
           Text(camera
-              ? 'Prop the phone so the camera sees you and your desk. 100% on-device, frames deleted instantly, flash never fires.'
-              : 'Study on Marrow / PrepLadder / Anki. Selected apps are locked for the whole block. No camera.',
+              ? 'Prop the phone so it sees your face and your book. Your face must stay visible and live, and no other device may be in view. 100% on-device, frames deleted instantly, flash never fires.'
+              : 'Study on Marrow / PrepLadder / Anki. No camera.',
               style: cap(color: C.ink)),
           const SizedBox(height: 12),
           Wrap(spacing: 6, children: [
@@ -170,7 +196,7 @@ class _StudyTabState extends ConsumerState<StudyTab> {
           ]),
           const SizedBox(height: 12),
           if (camera) ...[
-            Wrap(spacing: 6, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
+            Wrap(spacing: 6, runSpacing: 6, children: [
               Sel('Back camera', !st.front, () => st.setFront(false)),
               Sel('Front camera', st.front, () => st.setFront(true)),
             ]),
@@ -178,16 +204,36 @@ class _StudyTabState extends ConsumerState<StudyTab> {
             Wrap(spacing: 6, runSpacing: 6, children: [
               for (final s in [15, 30, 60, 120]) Sel('every ${s}s', st.interval == s, () => st.setInterval(s)),
             ]),
-          ] else
-            Row(children: [
-              Expanded(child: Text('${st.apps.length} apps selected', style: cap(color: C.ink, w: FontWeight.w700))),
-              InkBtn('Pick apps', onTap: () async {
-                final r = await showModalBottomSheet<List<String>>(
-                    context: context, isScrollControlled: true, backgroundColor: C.cream,
-                    builder: (_) => AppPicker(selected: st.apps));
-                if (r != null) st.setApps(r);
-              }),
-            ]),
+            const SizedBox(height: 10),
+            Text(
+              st.calibrating
+                  ? '📊 Calibration day: no lives are lost today. Today\'s distractions set your baseline.'
+                  : '❤️ Lives for this ${durLabel(minutes)} block: ${st.livesFor(minutes)} (50% of your Day-1 distractions)',
+              style: cap(color: C.ink, w: FontWeight.w700),
+            ),
+            const SizedBox(height: 12),
+          ],
+          Row(children: [
+            Expanded(
+              child: Text('${st.allowedApps.length} study apps allowed\nEverything else is locked while the timer runs.',
+                  style: cap(color: C.ink, w: FontWeight.w700)),
+            ),
+            InkBtn('Pick apps', onTap: () async {
+              final r = await showModalBottomSheet<List<String>>(
+                  context: context, isScrollControlled: true, backgroundColor: C.cream,
+                  builder: (_) => AppPicker(title: 'Pick allowed study apps', selected: st.allowedApps));
+              if (r != null) st.setAllowedApps(r);
+            }),
+          ]),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero, activeColor: C.tangerine,
+            title: const Text('🔒 Lock down End early', style: TextStyle(fontWeight: FontWeight.w800)),
+            subtitle: Text(st.hasPin
+                ? 'Ending a block early will need the Guardian PIN'
+                : 'Set a Guardian PIN in Rules first, or you cannot end early at all',
+                style: cap(color: C.ink)),
+            value: st.strict, onChanged: st.setStrict,
+          ),
         ]),
       ),
 

@@ -18,25 +18,31 @@ object LockStore {
         Settings.Global.getInt(c.contentResolver, Settings.Global.BOOT_COUNT)
     } catch (e: Exception) { -1 }
 
-    fun start(c: Context, durationMs: Long, pkgs: Collection<String>, nuclear: Boolean) {
+    /**
+     * allow=false: [pkgs] are BLOCKED (Quick Strict Lock / penalty lock).
+     * allow=true : ONLY [pkgs] (plus system essentials) may run (study timer whitelist).
+     */
+    fun start(c: Context, durationMs: Long, pkgs: Collection<String>, nuclear: Boolean, allow: Boolean = false) {
         val curRem = remaining(c)
+        val sameMode = curRem > 0 && allowMode(c) == allow
         val now = SystemClock.elapsedRealtime()
-        val dur = maxOf(durationMs, curRem)
+        val dur = if (sameMode) maxOf(durationMs, curRem) else durationMs
         val merged = HashSet<String>(pkgs)
-        if (curRem > 0) merged.addAll(packages(c))
-        val nuc = nuclear || (curRem > 0 && nuclear(c))
+        if (sameMode) merged.addAll(packages(c))
+        val nuc = nuclear || (sameMode && nuclear(c))
         sp(c).edit()
             .putLong("endElapsed", now + dur)
             .putLong("endWall", System.currentTimeMillis() + dur)
             .putInt("boot", bootCount(c))
             .putStringSet("pkgs", merged)
             .putBoolean("nuclear", nuc)
+            .putBoolean("allow", allow)
             .apply()
     }
 
     fun clear(c: Context) {
         sp(c).edit().remove("endElapsed").remove("endWall").remove("boot")
-            .remove("pkgs").remove("nuclear").apply()
+            .remove("pkgs").remove("nuclear").remove("allow").apply()
     }
 
     /** Remaining lock time in ms (0 if none). */
@@ -64,4 +70,5 @@ object LockStore {
     fun active(c: Context) = remaining(c) > 0
     fun packages(c: Context): Set<String> = sp(c).getStringSet("pkgs", emptySet()) ?: emptySet()
     fun nuclear(c: Context) = sp(c).getBoolean("nuclear", false)
+    fun allowMode(c: Context) = sp(c).getBoolean("allow", false)
 }

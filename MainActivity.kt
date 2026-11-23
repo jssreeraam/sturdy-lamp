@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
+import android.net.Uri
 import android.provider.Settings
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
@@ -44,7 +45,8 @@ class MainActivity : FlutterActivity() {
                 val ms = call.argument<Number>("ms")!!.toLong()
                 val pkgs = call.argument<List<String>>("pkgs") ?: emptyList()
                 val nuclear = call.argument<Boolean>("nuclear") ?: false
-                LockStore.start(this, ms, pkgs, nuclear)
+                val allow = call.argument<Boolean>("allow") ?: false
+                LockStore.start(this, ms, pkgs, nuclear, allow)
                 val i = Intent(this, LockGuardService::class.java)
                 if (Build.VERSION.SDK_INT >= 26) startForegroundService(i) else startService(i)
                 result.success(true)
@@ -55,6 +57,7 @@ class MainActivity : FlutterActivity() {
                 result.success(mapOf(
                     "active" to (r > 0), "remainingMs" to r,
                     "nuclear" to LockStore.nuclear(this),
+                    "allow" to LockStore.allowMode(this),
                     "pkgs" to LockStore.packages(this).toList()
                 ))
             }
@@ -64,6 +67,14 @@ class MainActivity : FlutterActivity() {
             }
             "openA11y" -> {
                 startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                result.success(true)
+            }
+            "canOverlay" -> result.success(Settings.canDrawOverlays(this))
+            "requestOverlay" -> {
+                startActivity(
+                    Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
                 result.success(true)
             }
             "isAdminActive" -> {

@@ -151,7 +151,9 @@ class _LockBannerState extends State<LockBanner> {
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('Lockdown active', style: hs(16, color: Colors.white)),
-            Text('${st.pkgs.length} apps blocked${st.nuclear ? ' · Nuclear' : ''}',
+            Text(st.allow
+                ? 'Study mode: only ${st.pkgs.length} apps allowed'
+                : '${st.pkgs.length} apps blocked${st.nuclear ? ' · Nuclear' : ''}',
                 style: cap(color: Colors.white60)),
           ]),
         ),
@@ -161,7 +163,7 @@ class _LockBannerState extends State<LockBanner> {
   }
 }
 
-/// Warns when the Accessibility blocker isn't enabled.
+/// Warns when a permission needed by the blocker is missing (Accessibility, Display over other apps).
 class A11yWarn extends StatefulWidget {
   const A11yWarn({super.key});
   @override
@@ -170,7 +172,7 @@ class A11yWarn extends StatefulWidget {
 
 class _A11yWarnState extends State<A11yWarn> {
   Timer? _t;
-  bool ok = true;
+  bool a11y = true, overlay = true;
   @override
   void initState() {
     super.initState();
@@ -178,24 +180,32 @@ class _A11yWarnState extends State<A11yWarn> {
     _t = Timer.periodic(const Duration(seconds: 2), (_) => _poll());
   }
   Future<void> _poll() async {
-    final v = await Native.isA11yEnabled();
-    if (mounted && v != ok) setState(() => ok = v);
+    final a = await Native.isA11yEnabled();
+    final o = await Native.canOverlay();
+    if (mounted && (a != a11y || o != overlay)) setState(() { a11y = a; overlay = o; });
   }
   @override
   void dispose() { _t?.cancel(); super.dispose(); }
 
   @override
   Widget build(BuildContext context) {
-    if (ok) return const SizedBox.shrink();
+    if (a11y && overlay) return const SizedBox.shrink();
+    final needA = !a11y;
     return Bento(
       color: C.butter,
       child: Row(children: [
         const Text('⚠️', style: TextStyle(fontSize: 24)),
         const SizedBox(width: 12),
-        Expanded(child: Text('Enable the FocusGuard blocker (Accessibility) so locks can close distraction apps.',
-            style: cap(color: C.ink, size: 13.5))),
+        Expanded(
+          child: Text(
+            needA
+                ? 'Enable the FocusGuard blocker (Accessibility) so locks can close other apps.'
+                : 'Allow "Display over other apps" so the study lock screen can cover blocked apps.',
+            style: cap(color: C.ink, size: 13.5),
+          ),
+        ),
         const SizedBox(width: 8),
-        InkBtn('Enable', onTap: Native.openA11y),
+        InkBtn(needA ? 'Enable' : 'Allow', onTap: needA ? Native.openA11y : Native.requestOverlay),
       ]),
     );
   }
@@ -204,7 +214,8 @@ class _A11yWarnState extends State<A11yWarn> {
 /// Bottom sheet to choose distraction apps.
 class AppPicker extends StatefulWidget {
   final List<String> selected;
-  const AppPicker({super.key, required this.selected});
+  final String title;
+  const AppPicker({super.key, required this.selected, this.title = 'Pick distraction apps'});
   @override
   State<AppPicker> createState() => _AppPickerState();
 }
@@ -232,7 +243,7 @@ class _AppPickerState extends State<AppPicker> {
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Pick distraction apps', style: hs(20)),
+                Text(widget.title, style: hs(20)),
                 const SizedBox(height: 10),
                 TextField(
                   decoration: const InputDecoration(hintText: 'Search apps', prefixIcon: Icon(Icons.search)),

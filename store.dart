@@ -21,9 +21,11 @@ class AppStore extends ChangeNotifier {
   Future<void> init() async {
     sp = await SharedPreferences.getInstance();
     final path = pth.join(await getDatabasesPath(), 'focusguard.db');
-    _db = await openDatabase(path, version: 1, onCreate: (db, v) async {
+    _db = await openDatabase(path, version: 2, onUpgrade: (db, o, n) async {
+      if (o < 2) { await db.execute('ALTER TABLE sessions ADD COLUMN distractions INTEGER DEFAULT 0'); }
+    }, onCreate: (db, v) async {
       await db.execute(
-          'CREATE TABLE sessions(id INTEGER PRIMARY KEY AUTOINCREMENT,startMs INTEGER,durationSec INTEGER,plannedMin INTEGER,subject TEXT,mode TEXT,kind TEXT,goal TEXT,focus INTEGER,tokens INTEGER,failed INTEGER,mcqTotal INTEGER,mcqCorrect INTEGER,gt INTEGER,highYield INTEGER,xp INTEGER,hardcore INTEGER)');
+          'CREATE TABLE sessions(id INTEGER PRIMARY KEY AUTOINCREMENT,startMs INTEGER,durationSec INTEGER,plannedMin INTEGER,subject TEXT,mode TEXT,kind TEXT,goal TEXT,focus INTEGER,tokens INTEGER,failed INTEGER,mcqTotal INTEGER,mcqCorrect INTEGER,gt INTEGER,highYield INTEGER,xp INTEGER,hardcore INTEGER,distractions INTEGER DEFAULT 0)');
       await db.execute(
           'CREATE TABLE revisions(id INTEGER PRIMARY KEY AUTOINCREMENT,topic TEXT,subject TEXT,highYield INTEGER,stage INTEGER,baseDay INTEGER,mastered INTEGER)');
     });
@@ -48,8 +50,10 @@ class AppStore extends ChangeNotifier {
   double get offH => sp.getDouble('offH') ?? 7;
   double get goalH => duty ? dutyH : offH;
   int get revXp => sp.getInt('revXp') ?? 0;
+  bool get strict => sp.getBool('strict') ?? false;
   bool get nuclear => sp.getBool('nuclear') ?? false;
   List<String> get apps => sp.getStringList('apps') ?? [];
+  List<String> get allowedApps => sp.getStringList('allowed') ?? [];
   bool get front => sp.getBool('front') ?? false;
   int get interval => sp.getInt('interval') ?? 30;
   int get honesty => sp.getInt('honesty') ?? 0;
@@ -70,8 +74,10 @@ class AppStore extends ChangeNotifier {
   }
   Future<void> setExam(bool ini, DateTime d) =>
       _set(sp.setInt(ini ? 'ini' : 'neet', d.millisecondsSinceEpoch));
+  Future<void> setStrict(bool v) => _set(sp.setBool('strict', v));
   Future<void> setNuclear(bool v) => _set(sp.setBool('nuclear', v));
   Future<void> setApps(List<String> a) => _set(sp.setStringList('apps', a));
+  Future<void> setAllowedApps(List<String> a) => _set(sp.setStringList('allowed', a));
   Future<void> setFront(bool v) => _set(sp.setBool('front', v));
   Future<void> setInterval(int s) => _set(sp.setInt('interval', s));
   Future<void> bumpHonesty() => _set(sp.setInt('honesty', honesty + 1));
@@ -284,6 +290,36 @@ class AppStore extends ChangeNotifier {
       Achv('🧠', 'Memory Palace', 'Master 10 topics', mastered >= 10),
       Achv('🎯', 'MCQ Centurion', 'Solve 500 MCQs', mcq >= 500),
     ];
+  }
+
+  // ---------- lives (Day-1 calibration) ----------
+  /// Day of the very first camera session = calibration day.
+  int? get calDay {
+    int? d;
+    for (final s in sessions) {
+      if (s.kind == 'camera') { final x = _dayOf(s); if (d == null || x < d) d = x; }
+    }
+    return d;
+  }
+  bool get calibrating { final d = calDay; return d == null || d == todayNum; }
+
+  ({int dist, double hours}) get baseline {
+    final d = calDay;
+    if (d == null) return (dist: 0, hours: 0.0);
+    int dist = 0; double sec = 0;
+    for (final s in sessions) {
+      if (s.kind == 'camera' && _dayOf(s) == d) { dist += s.distractions; sec += s.durationSec; }
+    }
+    return (dist: dist, hours: sec / 3600);
+  }
+
+  /// Lives for a camera block = 50% of the distractions you had on Day 1 in a block of the same length.
+  int livesFor(int minutes) {
+    if (calibrating) return 0;
+    final b = baseline;
+    if (b.hours < 0.5) return 5;
+    final raw = 0.5 * (b.dist / b.hours) * (minutes / 60);
+    return max(2, raw.ceil());
   }
 
   Future<void> forceRefresh() async { await reload(); }

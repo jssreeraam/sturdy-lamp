@@ -145,12 +145,21 @@ class _RulesTabState extends ConsumerState<RulesTab> with WidgetsBindingObserver
               style: cap(color: Colors.white60)),
           const SizedBox(height: 12),
           Row(children: [
-            Expanded(child: Text('${st.apps.length} distraction apps', style: cap(color: Colors.white, w: FontWeight.w800, size: 14))),
+            Expanded(child: Text('${st.apps.length} distraction apps (Quick Strict Lock)', style: cap(color: Colors.white, w: FontWeight.w800, size: 14))),
             Sel('Pick apps', false, () async {
               final r = await showModalBottomSheet<List<String>>(
                   context: context, isScrollControlled: true, backgroundColor: C.cream,
                   builder: (_) => AppPicker(selected: st.apps));
               if (r != null) st.setApps(r);
+            }, dark: true),
+          ]),
+          Row(children: [
+            Expanded(child: Text('${st.allowedApps.length} allowed study apps', style: cap(color: Colors.white, w: FontWeight.w800, size: 14))),
+            Sel('Pick apps', false, () async {
+              final r = await showModalBottomSheet<List<String>>(
+                  context: context, isScrollControlled: true, backgroundColor: C.cream,
+                  builder: (_) => AppPicker(title: 'Pick allowed study apps', selected: st.allowedApps));
+              if (r != null) st.setAllowedApps(r);
             }, dark: true),
           ]),
           SwitchListTile(

@@ -6,10 +6,10 @@ class AppInfo {
 }
 
 class LockStatus {
-  final bool active, nuclear;
+  final bool active, nuclear, allow;
   final int remainingMs;
   final List<String> pkgs;
-  const LockStatus(this.active, this.remainingMs, this.nuclear, this.pkgs);
+  const LockStatus(this.active, this.remainingMs, this.nuclear, this.pkgs, [this.allow = false]);
   static const none = LockStatus(false, 0, false, []);
 }
 
@@ -33,8 +33,9 @@ class Native {
     }).toList();
   }
 
-  static Future<void> startLock(int ms, List<String> pkgs, bool nuclear) =>
-      _c('startLock', {'ms': ms, 'pkgs': pkgs, 'nuclear': nuclear});
+  /// allow=true: ONLY [pkgs] (plus system essentials) may be used. allow=false: [pkgs] are blocked.
+  static Future<void> startLock(int ms, List<String> pkgs, bool nuclear, {bool allow = false}) =>
+      _c('startLock', {'ms': ms, 'pkgs': pkgs, 'nuclear': nuclear, 'allow': allow});
   static Future<void> clearLock() => _c('clearLock');
 
   static Future<LockStatus> lockStatus() async {
@@ -45,11 +46,14 @@ class Native {
       (r['remainingMs'] as num?)?.toInt() ?? 0,
       r['nuclear'] == true,
       ((r['pkgs'] as List?) ?? []).map((e) => e.toString()).toList(),
+      r['allow'] == true,
     );
   }
 
   static Future<bool> isA11yEnabled() async => (await _c<bool>('isA11yEnabled')) ?? false;
   static Future<void> openA11y() => _c('openA11y');
+  static Future<bool> canOverlay() async => (await _c<bool>('canOverlay')) ?? false;
+  static Future<void> requestOverlay() => _c('requestOverlay');
   static Future<bool> isAdminActive() async => (await _c<bool>('isAdminActive')) ?? false;
   static Future<void> requestAdmin() => _c('requestAdmin');
   static Future<bool> removeAdmin() async => (await _c<bool>('removeAdmin')) ?? false;

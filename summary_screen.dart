@@ -37,7 +37,7 @@ class _SummaryScreenState extends ConsumerState<SummaryScreen> {
     final ss = Session(
       startMs: r.start.millisecondsSinceEpoch, durationSec: r.durationSec, plannedMin: r.cfg.minutes,
       subject: r.cfg.subject, mode: r.cfg.mode, kind: r.cfg.camera ? 'camera' : 'phone', goal: text,
-      focus: r.focus, tokens: r.tokens, failed: r.failed,
+      focus: r.focus, tokens: r.tokens, failed: r.failed, distractions: r.distractions,
       mcqTotal: int.tryParse(mcqT.text) ?? 0, mcqCorrect: int.tryParse(mcqC.text) ?? 0,
       gt: int.tryParse(gt.text)?.clamp(0, 200).toInt(), highYield: hy, xp: xp, hardcore: r.cfg.hardcore,
     );
@@ -70,7 +70,7 @@ class _SummaryScreenState extends ConsumerState<SummaryScreen> {
                   builder: (_, v, __) => Text('+${v.round()} XP', style: hs(46, color: C.tangerine)),
                 ),
                 const SizedBox(height: 6),
-                Text('${hm(r.durationSec / 60)}  ·  ${r.focus}% focus${r.cfg.camera ? '  ·  ${r.tokens}/5 tokens' : ''}',
+                Text('${hm(r.durationSec / 60)}  ·  ${r.focus}% focus${r.cfg.camera ? (r.maxLives > 0 ? '  ·  ${r.tokens}/${r.maxLives} lives' : '  ·  ${r.distractions} distractions (calibration)') : ''}',
                     style: cap(color: C.ink, w: FontWeight.w700, size: 14)),
               ]),
             ),

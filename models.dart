@@ -35,11 +35,11 @@ String mmss(int secs) {
 class SessionConfig {
   final String subject, mode, goal;
   final int minutes, intervalSec;
-  final bool camera, front;
+  final bool camera, front, strict;
   const SessionConfig({
     required this.subject, required this.mode, required this.goal,
     required this.minutes, required this.camera, required this.front,
-    required this.intervalSec,
+    required this.intervalSec, this.strict = false,
   });
   bool get hardcore => minutes >= 180;
 }
@@ -47,17 +47,18 @@ class SessionConfig {
 class SessionResult {
   final SessionConfig cfg;
   final DateTime start;
-  final int durationSec, focus, tokens;
+  final int durationSec, focus, tokens, maxLives, distractions;
   final bool failed;
   const SessionResult({
     required this.cfg, required this.start, required this.durationSec,
     required this.focus, required this.tokens, required this.failed,
+    this.maxLives = 0, this.distractions = 0,
   });
 }
 
 class Session {
   int? id;
-  int startMs, durationSec, plannedMin, focus, tokens, mcqTotal, mcqCorrect, xp;
+  int startMs, durationSec, plannedMin, focus, tokens, mcqTotal, mcqCorrect, xp, distractions;
   String subject, mode, kind, goal;
   bool failed, highYield, hardcore;
   int? gt;
@@ -67,7 +68,7 @@ class Session {
     required this.subject, required this.mode, required this.kind, required this.goal,
     required this.focus, required this.tokens, required this.failed,
     this.mcqTotal = 0, this.mcqCorrect = 0, this.gt, this.highYield = false,
-    required this.xp, this.hardcore = false,
+    required this.xp, this.hardcore = false, this.distractions = 0,
   });
 
   double get minutes => durationSec / 60.0;
@@ -78,7 +79,7 @@ class Session {
         'subject': subject, 'mode': mode, 'kind': kind, 'goal': goal, 'focus': focus,
         'tokens': tokens, 'failed': failed ? 1 : 0, 'mcqTotal': mcqTotal,
         'mcqCorrect': mcqCorrect, 'gt': gt, 'highYield': highYield ? 1 : 0, 'xp': xp,
-        'hardcore': hardcore ? 1 : 0,
+        'hardcore': hardcore ? 1 : 0, 'distractions': distractions,
       };
 
   factory Session.fromMap(Map<String, Object?> m) => Session(
@@ -99,6 +100,7 @@ class Session {
         highYield: (m['highYield'] as int?) == 1,
         xp: (m['xp'] as int?) ?? 0,
         hardcore: (m['hardcore'] as int?) == 1,
+        distractions: (m['distractions'] as int?) ?? 0,
       );
 }
 
